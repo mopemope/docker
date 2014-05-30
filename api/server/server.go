@@ -177,6 +177,18 @@ func getContainersExport(eng *engine.Engine, version version.Version, w http.Res
 	return nil
 }
 
+func getContainersBackup(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	if vars == nil {
+		return fmt.Errorf("Missing parameter")
+	}
+	job := eng.Job("backup", vars["name"])
+	job.Stdout.Add(w)
+	if err := job.Run(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func getImagesJSON(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if err := parseForm(r); err != nil {
 		return err
@@ -1062,6 +1074,7 @@ func createRouter(eng *engine.Engine, logging, enableCors bool, dockerVersion st
 			"/containers/ps":                  getContainersJSON,
 			"/containers/json":                getContainersJSON,
 			"/containers/{name:.*}/export":    getContainersExport,
+			"/containers/{name:.*}/backup":    getContainersBackup,
 			"/containers/{name:.*}/changes":   getContainersChanges,
 			"/containers/{name:.*}/json":      getContainersByName,
 			"/containers/{name:.*}/top":       getContainersTop,

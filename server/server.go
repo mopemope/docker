@@ -147,6 +147,7 @@ func InitServer(job *engine.Job) engine.Status {
 		"events":           srv.Events,
 		"push":             srv.ImagePush,
 		"containers":       srv.Containers,
+		"backup":           srv.ContainerBackup,
 	} {
 		if err := job.Eng.Register(name, srv.handlerWrap(handler)); err != nil {
 			return job.Error(err)
@@ -303,6 +304,29 @@ func (srv *Server) ContainerExport(job *engine.Job) engine.Status {
 	name := job.Args[0]
 	if container := srv.daemon.Get(name); container != nil {
 		data, err := container.Export()
+		if err != nil {
+			return job.Errorf("%s: %s", name, err)
+		}
+		defer data.Close()
+
+		// Stream the entire contents of the container (basically a volatile snapshot)
+		if _, err := io.Copy(job.Stdout, data); err != nil {
+			return job.Errorf("%s: %s", name, err)
+		}
+		// FIXME: factor job-specific LogEvent to engine.Job.Run()
+		srv.LogEvent("export", container.ID, srv.daemon.Repositories().ImageName(container.Image))
+		return engine.StatusOK
+	}
+	return job.Errorf("No such container: %s", name)
+}
+
+func (srv *Server) ContainerBackup(job *engine.Job) engine.Status {
+	if len(job.Args) != 1 {
+		return job.Errorf("Usage: %s container_id", job.Name)
+	}
+	name := job.Args[0]
+	if container := srv.daemon.Get(name); container != nil {
+		data, err := container.Backup()
 		if err != nil {
 			return job.Errorf("%s: %s", name, err)
 		}

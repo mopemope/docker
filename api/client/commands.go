@@ -47,6 +47,7 @@ func (cli *DockerCli) CmdHelp(args ...string) error {
 	help := fmt.Sprintf("Usage: docker [OPTIONS] COMMAND [arg...]\n -H=[unix://%s]: tcp://host:port to bind/connect to or unix://path/to/socket to use\n\nA self-sufficient runtime for linux containers.\n\nCommands:\n", api.DEFAULTUNIXSOCKET)
 	for _, command := range [][]string{
 		{"attach", "Attach to a running container"},
+		{"backup", "Stream the contents of a container as a tar archive with volumes"},
 		{"build", "Build an image from a Dockerfile"},
 		{"commit", "Create a new image from a container's changes"},
 		{"cp", "Copy files/folders from the containers filesystem to the host path"},
@@ -1543,6 +1544,23 @@ func (cli *DockerCli) CmdExport(args ...string) error {
 	}
 
 	if err := cli.stream("GET", "/containers/"+cmd.Arg(0)+"/export", nil, cli.out, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cli *DockerCli) CmdBackup(args ...string) error {
+	cmd := cli.Subcmd("backup", "CONTAINER", "Backup the contents of a filesystem as a tar archive to STDOUT")
+	if err := cmd.Parse(args); err != nil {
+		return nil
+	}
+
+	if cmd.NArg() != 1 {
+		cmd.Usage()
+		return nil
+	}
+
+	if err := cli.stream("GET", "/containers/"+cmd.Arg(0)+"/backup", nil, cli.out, nil); err != nil {
 		return err
 	}
 	return nil

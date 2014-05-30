@@ -26,6 +26,7 @@ import (
 	"github.com/dotcloud/docker/pkg/networkfs/etchosts"
 	"github.com/dotcloud/docker/pkg/networkfs/resolvconf"
 	"github.com/dotcloud/docker/pkg/symlink"
+	"github.com/dotcloud/docker/pkg/system"
 	"github.com/dotcloud/docker/runconfig"
 	"github.com/dotcloud/docker/utils"
 )
@@ -652,6 +653,59 @@ func (container *Container) Export() (archive.Archive, error) {
 		}),
 		nil
 }
+
+func (container *Container) Backup() (archive.Archive, error) {
+	if err := container.Mount(); err != nil {
+		return nil, err
+	}
+
+	// Mount Volumes
+	if err := prepareVolumesForContainer(container); err != nil {
+		return nil, err
+	}
+	utils.Debugf("Backup Container Root %s", container.basefs);
+
+	for mntPath, volPath := range container.Volumes {
+		utils.Debugf("Backup Volumes Mount Info  %s %s ", mntPath, volPath);
+		var (
+			flags = syscall.MS_BIND | syscall.MS_REC | syscall.MS_RDONLY
+			dest  = filepath.Join(container.basefs, mntPath)
+		)
+
+		if err := system.Mount(volPath, dest, "bind", uintptr(flags), ""); err != nil {
+			return nil, fmt.Errorf("mounting %s into %s %s", volPath, dest, err)
+		}
+		if err := system.Mount(volPath, dest, "bind", uintptr(flags|syscall.MS_REMOUNT), ""); err != nil {
+			return nil, fmt.Errorf("remounting %s into %s %s", volPath, dest, err)
+		}
+	}
+
+	archive, err := archive.Tar(container.basefs, archive.Uncompressed)
+	if err != nil {
+		for mntPath, volPath := range container.Volumes {
+			dest := filepath.Join(container.basefs, mntPath)
+			if err := system.Unmount(dest, syscall.MNT_DETACH); err != nil {
+				fmt.Errorf("mounting %s into %s %s", volPath, dest, err)
+			}
+		}
+		container.Unmount()
+		return nil, err
+	}
+	
+	return utils.NewReadCloserWrapper(archive, func() error {
+		err := archive.Close()
+		for mntPath, volPath := range container.Volumes {
+			dest := filepath.Join(container.basefs, mntPath)
+			if err := system.Unmount(dest, syscall.MNT_DETACH); err != nil {
+				fmt.Errorf("mounting %s into %s %s", volPath, dest, err)
+			}
+		}
+		container.Unmount()
+		return err
+	}),
+		nil
+}
+
 
 func (container *Container) WaitTimeout(timeout time.Duration) error {
 	done := make(chan bool, 1)
