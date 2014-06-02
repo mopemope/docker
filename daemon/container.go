@@ -23,6 +23,7 @@ import (
 	"github.com/dotcloud/docker/links"
 	"github.com/dotcloud/docker/nat"
 	"github.com/dotcloud/docker/pkg/label"
+	"github.com/dotcloud/docker/pkg/libcontainer/devices"
 	"github.com/dotcloud/docker/pkg/networkfs/etchosts"
 	"github.com/dotcloud/docker/pkg/networkfs/resolvconf"
 	"github.com/dotcloud/docker/pkg/symlink"
@@ -231,18 +232,20 @@ func populateCommand(c *Container, env []string) error {
 		Cpuset:     c.Config.Cpuset,
 	}
 	c.command = &execdriver.Command{
-		ID:         c.ID,
-		Privileged: c.hostConfig.Privileged,
-		Rootfs:     c.RootfsPath(),
-		InitPath:   "/.dockerinit",
-		Entrypoint: c.Path,
-		Arguments:  c.Args,
-		WorkingDir: c.Config.WorkingDir,
-		Network:    en,
-		Tty:        c.Config.Tty,
-		User:       c.Config.User,
-		Config:     context,
-		Resources:  resources,
+		ID:                 c.ID,
+		Privileged:         c.hostConfig.Privileged,
+		Rootfs:             c.RootfsPath(),
+		InitPath:           "/.dockerinit",
+		Entrypoint:         c.Path,
+		Arguments:          c.Args,
+		WorkingDir:         c.Config.WorkingDir,
+		Network:            en,
+		Tty:                c.Config.Tty,
+		User:               c.Config.User,
+		Config:             context,
+		Resources:          resources,
+		AllowedDevices:     devices.DefaultAllowedDevices,
+		AutoCreatedDevices: devices.DefaultAutoCreatedDevices,
 	}
 	c.command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	c.command.Env = env
@@ -469,6 +472,20 @@ func (container *Container) monitor(callback execdriver.StartCallback) error {
 		utils.Errorf("Error running container: %s", err)
 	}
 
+	// Cleanup
+	container.cleanup()
+
+	// Re-create a brand new stdin pipe once the container exited
+	if container.Config.OpenStdin {
+		container.stdin, container.stdinPipe = io.Pipe()
+	}
+
+	if container.daemon != nil && container.daemon.srv != nil {
+		container.daemon.srv.LogEvent("die", container.ID, container.daemon.repositories.ImageName(container.Image))
+	}
+
+	close(container.waitLock)
+
 	if container.daemon != nil && container.daemon.srv != nil && container.daemon.srv.IsRunning() {
 		container.State.SetStopped(exitCode)
 
@@ -483,20 +500,6 @@ func (container *Container) monitor(callback execdriver.StartCallback) error {
 			utils.Errorf("Error dumping container state to disk: %s\n", err)
 		}
 	}
-
-	// Cleanup
-	container.cleanup()
-
-	// Re-create a brand new stdin pipe once the container exited
-	if container.Config.OpenStdin {
-		container.stdin, container.stdinPipe = io.Pipe()
-	}
-
-	if container.daemon != nil && container.daemon.srv != nil {
-		container.daemon.srv.LogEvent("die", container.ID, container.daemon.repositories.ImageName(container.Image))
-	}
-
-	close(container.waitLock)
 
 	return err
 }
